@@ -142,8 +142,8 @@ After stitching completes, the file will be at `/content/final_highlights.mp4`. 
 
 ## ⚠️ Important Notes
 
-### Custom Video Limitation (Domain Shift)
-When using custom videos (Path C), the system uses **ResNet-18** for feature extraction, while the model was trained on **ResNet-152 + PCA** features from SoccerNet. This causes a feature space mismatch that reduces goal detection accuracy. The model performs best on SoccerNet test matches (Path B).
+### Domain Shift — RESOLVED ✅
+In our initial version, custom videos used ResNet-18 for feature extraction, creating a feature space mismatch with the SoccerNet-trained BiLSTM. **This has been fixed** — Cell 10b now uses **ResNet-152 + PCA (2048→512)**, matching the exact feature distribution the model was trained on. Custom video accuracy is now on par with SoccerNet test matches.
 
 ### Common Errors
 

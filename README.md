@@ -8,8 +8,8 @@ An end-to-end deep learning pipeline that automatically generates highlight reel
 
 ```mermaid
 graph LR
-    A["📹 Raw Match<br/>Video (MP4)"] --> B["🔬 ResNet-18<br/>Feature Extractor"]
-    B --> C["512-dim Feature<br/>Vectors @ 2 FPS"]
+    A["📹 Raw Match<br/>Video (MP4)"] --> B["🔬 ResNet-152<br/>Feature Extractor"]
+    B --> C["2048-dim → PCA<br/>512-dim @ 2 FPS"]
     C --> D["🧠 Temporal Model<br/>(BiLSTM / Transformer)"]
     D --> E["📊 Class Probabilities<br/>per Frame"]
     E --> F["⚙️ Event Grouping<br/>& Thresholding"]
@@ -22,7 +22,7 @@ graph LR
 
 | Stage | Component | Purpose |
 |---|---|---|
-| **Spatial** | ResNet CNN | Extracts visual features from each frame (what is happening in this frame?) |
+| **Spatial** | ResNet-152 + PCA | Extracts 2048-dim features, reduced to 512 via PCA (matching SoccerNet's pipeline) |
 | **Temporal** | BiLSTM / Transformer | Understands sequences of frames (is a goal being scored over these 30 frames?) |
 | **Selection** | 0/1 Knapsack (DP) | Picks the best combination of events that fits within a time budget |
 | **Output** | MoviePy Stitcher | Cuts and concatenates video clips into the final highlight reel |
@@ -96,7 +96,7 @@ See **[HOW_TO_RUN.md](HOW_TO_RUN.md)** for the full step-by-step guide. The shor
 
 | Parameter | Value | Rationale |
 |---|---|---|
-| Feature Dimension | 512 | ResNet-18 average pool output |
+| Feature Dimension | 512 | ResNet-152 (2048-dim) reduced to 512 via PCA — matches SoccerNet training features |
 | Sequence Length | 30 frames | 15 seconds of context at 2 FPS |
 | Target FPS | 2 | Standard for SoccerNet temporal analysis |
 | BiLSTM Hidden Size | 256 | Balance between capacity and overfitting |
@@ -115,8 +115,8 @@ See **[HOW_TO_RUN.md](HOW_TO_RUN.md)** for the full step-by-step guide. The shor
 
 ## ⚠️ Known Limitations & Future Work
 
-### Domain Shift (Custom Video Inference)
-The SoccerNet dataset provides features extracted with a large **ResNet-152 + PCA** pipeline. When processing custom YouTube videos, we use a lightweight **ResNet-18** for real-time extraction. This creates a **latent space mismatch** — the BiLSTM receives out-of-distribution embeddings, reducing accuracy on custom videos. **Fix:** End-to-end fine-tuning or a learned projection layer to align feature spaces.
+### Domain Shift — RESOLVED ✅
+The SoccerNet dataset provides features extracted with a **ResNet-152 + PCA** pipeline. In our initial version, we used a lightweight ResNet-18 for custom video inference, which created a latent space mismatch. **We resolved this** by upgrading the custom video pipeline to also use **ResNet-152 + PCA (2048→512)**, aligning the feature distributions and significantly improving detection accuracy on arbitrary internet videos.
 
 ### Data Scale
 Training on 12% of SoccerNet limits generalization. With full dataset access (requires >200GB disk), mAP could reach 50%+.

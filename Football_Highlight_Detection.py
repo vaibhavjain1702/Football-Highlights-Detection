@@ -5,7 +5,7 @@
 # **Academic Context & Architecture Explanation**
 # This project fulfills Advanced Deep Learning requirements by implementing a two-stage computer vision and sequential modeling pipeline:
 # 
-# 1. **Spatial Feature Extraction (CNN)**: Uses a pre-trained ResNet18 convolutional neural network to extract 512-dimensional spatial feature vectors from raw video frames at 2 FPS. This isolates the spatial semantics (e.g., players, ball, field lines) from the raw pixel data.
+# 1. **Spatial Feature Extraction (CNN)**: Uses a pre-trained ResNet-152 convolutional neural network to extract 2048-dimensional spatial feature vectors from raw video frames at 2 FPS, then applies PCA to reduce to 512 dimensions (matching SoccerNet's feature format). This isolates the spatial semantics (e.g., players, ball, field lines) from the raw pixel data.
 # 2. **Temporal Modeling (RNN / Attention)**: Processes the extracted frame features using sliding windows (sequences of 15 seconds). It compares three temporal architectures:
 #    - **Baseline CNN**: Processes independently via dense layers.
 #    - **Bi-Directional LSTM**: Captures forward and backward temporal dependencies across frames.
@@ -1437,7 +1437,7 @@ def generate_highlights(model, match_source, config, max_highlight_minutes=10):
 
         # Detect events (non-background predictions above threshold)
         bg_class = config['num_classes'] - 1
-        event_mask = all_probs[:, :bg_class].max(axis=1) > 0.5
+        event_mask = all_probs[:, :bg_class].max(axis=1) > 0.3
 
         # Group consecutive detections into events
         events = []
@@ -1582,72 +1582,89 @@ import torchvision.transforms as transforms
 from PIL import Image
 
 def extract_features_from_video(video_path, output_path, target_fps=2):
-    """Extracts ResNet18 features (512-dim) from an mp4 video at target_fps."""
+    """
+    Extracts ResNet-152 features from video, then applies PCA to reduce
+    from 2048-dim to 512-dim — closely matching SoccerNet's feature format.
+    """
     print(f"🎬 Processing video: {video_path}")
     if not os.path.exists(video_path):
         print("❌ Video file not found.")
         return False
-        
+
     device = CONFIG['device']
-    # ResNet18 outputs 512-dim features, matching our CONFIG
-    # Remove the final classification layer to get the 512-d pooled features
-    resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+    from sklearn.decomposition import PCA
+
+    # ---- ResNet-152 instead of ResNet-18 ----
+    # SoccerNet uses ResNet-152 (TF2). We use ResNet-152 (PyTorch).
+    # Both are pre-trained on ImageNet → similar feature representations.
+    print("📦 Loading ResNet-152 (matches SoccerNet's feature extractor)...")
+    resnet = models.resnet152(weights=models.ResNet152_Weights.DEFAULT)
     modules = list(resnet.children())[:-1]
     feature_extractor = nn.Sequential(*modules).to(device)
     feature_extractor.eval()
-    
+
     preprocess = transforms.Compose([
         transforms.Resize(256),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
-    
+
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     if fps == 0:
-        print("❌ Could not read video FPS. Check if file is a valid video.")
+        print("❌ Could not read video FPS.")
         return False
-        
+
     frame_interval = max(1, int(round(fps / target_fps)))
-    features = []
-    
+    raw_features = []
+
     count = 0
     saved_count = 0
-    print("⏳ Extracting features... This will take a while for a full match.")
+    print("⏳ Extracting ResNet-152 features (2048-dim)... This will take a while.")
     with torch.no_grad():
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-                
+
             if count % frame_interval == 0:
-                # Convert BGR to RGB
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 img = Image.fromarray(frame_rgb)
                 input_tensor = preprocess(img).unsqueeze(0).to(device)
-                
-                # Extract
+
                 feat = feature_extractor(input_tensor)
-                feat = feat.view(-1).cpu().numpy()
-                features.append(feat)
+                feat = feat.view(-1).cpu().numpy()  # 2048-dim vector
+                raw_features.append(feat)
                 saved_count += 1
-                
+
                 if saved_count % 500 == 0:
-                    print(f"   Extracted {saved_count} frames ({(saved_count/target_fps)/60:.1f} minutes of video)...")
+                    print(f"   Extracted {saved_count} frames "
+                          f"({(saved_count/target_fps)/60:.1f} min of video)...")
             count += 1
-            
+
     cap.release()
-    
-    features_array = np.array(features)
-    print(f"✅ Extracted features shape: {features_array.shape}")
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    np.save(output_path, features_array)
+
+    raw_features = np.array(raw_features)  # Shape: (N, 2048)
+    print(f"✅ Raw features shape: {raw_features.shape}")
+
+    # ---- Apply PCA 2048 → 512 ----
+    print("🔄 Applying PCA: 2048-dim → 512-dim (matching SoccerNet format)...")
+    if raw_features.shape[0] < 512:
+        pca = PCA(n_components=raw_features.shape[0])
+        features_reduced = pca.fit_transform(raw_features)
+        features_512 = np.pad(features_reduced, ((0,0), (0, 512 - raw_features.shape[0])))
+    else:
+        pca = PCA(n_components=512)
+        features_512 = pca.fit_transform(raw_features)
+
+    print(f"✅ Final features shape: {features_512.shape}")
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+    np.save(output_path, features_512.astype(np.float32))
     print(f"💾 Saved features to: {output_path}")
     return True
 
-print("✅ End-to-End Feature Extractor defined.")
-print("   Usage: extract_features_from_video('/content/my_match.mp4', '/content/my_match_features.npy')")
+print("✅ End-to-End Feature Extractor (ResNet-152 + PCA) defined.")
 
 # %% [markdown]
 # ## Cell 10c: Create Final Highlight Video Output
