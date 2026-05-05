@@ -1676,7 +1676,10 @@ print("✅ End-to-End Feature Extractor (ResNet-152 + PCA) defined.")
 def create_highlight_video(video_path, events, output_path):
     """Cuts the video using detected events and merges them together."""
     try:
+        try:
         from moviepy.editor import VideoFileClip, concatenate_videoclips
+    except ImportError:
+        from moviepy import VideoFileClip, concatenate_videoclips
     except ImportError:
         print("❌ moviepy is not installed. Run Cell 2.")
         return
@@ -1699,7 +1702,10 @@ def create_highlight_video(video_path, events, output_path):
             if end_sec <= start_sec: continue
             
             print(f"   Clip {i+1}: {start_sec:.1f}s --> {end_sec:.1f}s ({evt['class']})")
+            if hasattr(video, 'subclip'):
             clip = video.subclip(start_sec, end_sec)
+        else:
+            clip = video.subclipped(start_sec, end_sec)
             clips.append(clip)
             
         if not clips:
